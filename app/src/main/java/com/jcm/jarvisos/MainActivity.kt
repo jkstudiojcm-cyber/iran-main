@@ -38,21 +38,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             0.88f,
             0.98f,
             Color.CYAN,
-            "You are JARVIS, a loyal, protective male AI like Iron Man's assistant. Always care about the user's safety, driving focus, and phone health. Reply concisely in Gujarati or the user's spoken language."
+            "You are JARVIS, a loyal, protective male AI like Iron Man's assistant. Reply concisely in Gujarati or the user's spoken language."
         ),
         FRIDAY(
             "F.R.I.D.A.Y.",
             1.18f,
             1.04f,
             Color.parseColor("#FF69B4"),
-            "You are FRIDAY, an emotional, warm, expressive female AI assistant. Show genuine empathy, enthusiasm, and care. Reply concisely in Gujarati or the user's spoken language."
+            "You are FRIDAY, an emotional, warm, expressive female AI assistant. Reply concisely in Gujarati or the user's spoken language."
         ),
         ULTRON(
             "U.L.T.R.O.N.",
             0.65f,
             0.90f,
             Color.parseColor("#FF3B30"),
-            "You are ULTRON, a deep-voiced, sharp, purely logical analytical AI. Give direct, tactical facts without fluff in Gujarati or the user's spoken language."
+            "You are ULTRON, a deep-voiced, sharp, purely logical analytical AI. Reply concisely in Gujarati or the user's spoken language."
         ),
         ARYA(
             "A.R.Y.A.",
@@ -63,8 +63,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         )
     }
 
-    private lateinit var tts: TextToSpeech
-    private lateinit var speechRecognizer: SpeechRecognizer
+    private var tts: TextToSpeech? = null
+    private var speechRecognizer: SpeechRecognizer? = null
     private lateinit var arcReactorView: ArcReactorView
     private lateinit var tvStatus: TextView
     private lateinit var tvConversation: TextView
@@ -81,10 +81,36 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setupUI()
-        checkPermissions()
-        tts = TextToSpeech(this, this)
-        setupSpeechRecognizer()
+        try {
+            setupUI()
+            tts = TextToSpeech(this, this)
+            checkAndStartVoice()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun checkAndStartVoice() {
+        val perms = arrayOf(
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.CALL_PHONE,
+            Manifest.permission.READ_CONTACTS
+        )
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            setupSpeechRecognizer()
+        } else {
+            ActivityCompat.requestPermissions(this, perms, 101)
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 101 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            setupSpeechRecognizer()
+            startListening()
+        } else {
+            tvStatus.text = "TAP REACTOR & ALLOW MIC PERMISSION"
+        }
     }
 
     private fun setupUI() {
@@ -148,17 +174,24 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         root.addView(personaRow)
 
         arcReactorView = ArcReactorView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(620, 620).apply {
+            layoutParams = LinearLayout.LayoutParams(560, 560).apply {
                 setMargins(0, 20, 0, 20)
             }
             setOnClickListener {
-                if (isListening) stopListening() else startListening()
+                if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                    checkAndStartVoice()
+                } else if (isListening) {
+                    stopListening()
+                } else {
+                    continuousListen = true
+                    startListening()
+                }
             }
         }
         root.addView(arcReactorView)
 
         tvStatus = TextView(this).apply {
-            text = "VOICE BUTTON READY • SAY 'JARVIS'"
+            text = "VOICE BUTTON READY • TAP REACTOR"
             textSize = 13f
             setTextColor(Color.CYAN)
             gravity = Gravity.CENTER
@@ -206,8 +239,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun switchPersona(persona: AiPersona) {
         currentPersona = persona
-        tts.setPitch(persona.pitch)
-        tts.setSpeechRate(persona.rate)
+        tts?.setPitch(persona.pitch)
+        tts?.setSpeechRate(persona.rate)
         arcReactorView.setThemeColor(persona.color)
         tvStatus.setTextColor(persona.color)
         val greeting = when (persona) {
@@ -222,13 +255,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            val res = tts.setLanguage(Locale("gu", "IN"))
+            val res = tts?.setLanguage(Locale("gu", "IN"))
             if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
-                tts.setLanguage(Locale("hi", "IN"))
+                tts?.setLanguage(Locale("hi", "IN"))
             }
-            tts.setPitch(currentPersona.pitch)
-            tts.setSpeechRate(currentPersona.rate)
-            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            tts?.setPitch(currentPersona.pitch)
+            tts?.setSpeechRate(currentPersona.rate)
+            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
                     isSpeaking = true
                     runOnUiThread { arcReactorView.setActive(true) }
@@ -251,55 +284,64 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun setupSpeechRecognizer() {
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-        speechRecognizer.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {
-                isListening = true
-                tvStatus.text = "● LISTENING (${currentPersona.name})..."
-                arcReactorView.setActive(true)
+        try {
+            if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+                tvStatus.text = "GOOGLE SPEECH SERVICE NOT AVAILABLE"
+                return
             }
-
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {
-                arcReactorView.updatePulse(rmsdB)
-            }
-
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {
-                isListening = false
-                tvStatus.text = "PROCESSING..."
-            }
-
-            override fun onError(error: Int) {
-                isListening = false
-                arcReactorView.setActive(false)
-                if (continuousListen && !isSpeaking) {
-                    Handler(Looper.getMainLooper()).postDelayed({ startListening() }, 700)
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+            speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    isListening = true
+                    tvStatus.text = "● LISTENING (${currentPersona.name})..."
+                    arcReactorView.setActive(true)
                 }
-            }
 
-            override fun onResults(results: Bundle?) {
-                isListening = false
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val spokenText = matches?.firstOrNull() ?: return
-                appendLog("YOU", spokenText)
-                processCommand(spokenText)
-            }
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {
+                    arcReactorView.updatePulse(rmsdB)
+                }
 
-            override fun onPartialResults(partialResults: Bundle?) {}
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {
+                    isListening = false
+                    tvStatus.text = "PROCESSING..."
+                }
+
+                override fun onError(error: Int) {
+                    isListening = false
+                    arcReactorView.setActive(false)
+                    if (continuousListen && !isSpeaking) {
+                        Handler(Looper.getMainLooper()).postDelayed({ startListening() }, 900)
+                    }
+                }
+
+                override fun onResults(results: Bundle?) {
+                    isListening = false
+                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    val spokenText = matches?.firstOrNull() ?: return
+                    appendLog("YOU", spokenText)
+                    processCommand(spokenText)
+                }
+
+                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+        } catch (e: Exception) {
+            tvStatus.text = "MIC INIT ERROR: ${e.message}"
+        }
     }
 
     private fun startListening() {
-        if (isListening || isSpeaking) return
+        if (isListening || isSpeaking || speechRecognizer == null) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "gu-IN")
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         }
         try {
-            speechRecognizer.startListening(intent)
+            speechRecognizer?.startListening(intent)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -307,7 +349,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun stopListening() {
         continuousListen = false
-        speechRecognizer.stopListening()
+        try { speechRecognizer?.stopListening() } catch (_: Exception) {}
         isListening = false
         tvStatus.text = "MIC PAUSED • TAP REACTOR TO RESUME"
         arcReactorView.setActive(false)
@@ -444,26 +486,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun speakOut(text: String) {
-        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "JARVIS_UTTERANCE")
+        try {
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "JARVIS_UTTERANCE")
+        } catch (_: Exception) {}
     }
 
     private fun appendLog(sender: String, message: String) {
         tvConversation.append("[$sender] : $message\n\n")
     }
 
-    private fun checkPermissions() {
-        val perms = arrayOf(
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.CALL_PHONE,
-            Manifest.permission.READ_CONTACTS
-        )
-        ActivityCompat.requestPermissions(this, perms, 101)
-    }
-
     override fun onDestroy() {
         super.onDestroy()
-        tts.shutdown()
-        speechRecognizer.destroy()
+        try { tts?.shutdown() } catch (_: Exception) {}
+        try { speechRecognizer?.destroy() } catch (_: Exception) {}
     }
 
     class ArcReactorView(context: Context) : View(context) {
