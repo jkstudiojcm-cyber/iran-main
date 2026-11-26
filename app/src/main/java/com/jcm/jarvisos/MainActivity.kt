@@ -1,6 +1,7 @@
 package com.jcm.jarvisos
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.*
@@ -25,45 +26,76 @@ import java.util.*
 
 class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
-    enum class AiPersona(val title: String, val pitch: Float, val rate: Float, val color: Int, val systemPrompt: String) {
-        JARVIS("J.A.R.V.I.S.", 0.88f, 0.98f, Color.CYAN,
-            "You are JARVIS, a loyal, protective male AI like Iron Man's assistant. Always care about the user's safety, driving focus, and phone health. Reply concisely in Gujarati or the user's spoken language."),
-        FRIDAY("F.R.I.D.A.Y.", 1.18f, 1.04f, Color.parseColor("#FF69B4"),
-            "You are FRIDAY, an emotional, warm, expressive female AI assistant. Show genuine empathy, enthusiasm, and care. Reply concisely in Gujarati or the user's spoken language."),
-        ULTRON("U.L.T.R.O.N.", 0.65f, 0.90f, Color.parseColor("#FF3B30"),
-            "You are ULTRON, a deep-voiced, sharp, purely logical analytical AI. Give direct, tactical facts without fluff in Gujarati or the user's spoken language."),
-        ARYA("A.R.Y.A.", 1.08f, 1.00f, Color.parseColor("#34C759"),
-            "You are ARYA, a friendly, smart Gujarati personal voice assistant. Reply naturally and helpfully in Gujarati.")
+    enum class AiPersona(
+        val title: String,
+        val pitch: Float,
+        val rate: Float,
+        val color: Int,
+        val systemPrompt: String
+    ) {
+        JARVIS(
+            "J.A.R.V.I.S.",
+            0.88f,
+            0.98f,
+            Color.CYAN,
+            "You are JARVIS, a loyal, protective male AI like Iron Man's assistant. Always care about the user's safety, driving focus, and phone health. Reply concisely in Gujarati or the user's spoken language."
+        ),
+        FRIDAY(
+            "F.R.I.D.A.Y.",
+            1.18f,
+            1.04f,
+            Color.parseColor("#FF69B4"),
+            "You are FRIDAY, an emotional, warm, expressive female AI assistant. Show genuine empathy, enthusiasm, and care. Reply concisely in Gujarati or the user's spoken language."
+        ),
+        ULTRON(
+            "U.L.T.R.O.N.",
+            0.65f,
+            0.90f,
+            Color.parseColor("#FF3B30"),
+            "You are ULTRON, a deep-voiced, sharp, purely logical analytical AI. Give direct, tactical facts without fluff in Gujarati or the user's spoken language."
+        ),
+        ARYA(
+            "A.R.Y.A.",
+            1.08f,
+            1.00f,
+            Color.parseColor("#34C759"),
+            "You are ARYA, a friendly, smart Gujarati personal voice assistant. Reply naturally and helpfully in Gujarati."
+        )
     }
 
-    private var currentAi = AiPersona.JARVIS
-    private var isDrivingWhisperMode = true
-    private var isAwakeActive = false
-    private var speechRecognizer: SpeechRecognizer? = null
-    private var tts: TextToSpeech? = null
-    private lateinit var hudView: ArcReactorHudView
-    private lateinit var statusText: TextView
-    private lateinit var logText: TextView
-    private lateinit var modeBadge: TextView
-    private lateinit var driveToggleBtn: Button
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private lateinit var tts: TextToSpeech
+    private lateinit var speechRecognizer: SpeechRecognizer
+    private lateinit var arcReactorView: ArcReactorView
+    private lateinit var tvStatus: TextView
+    private lateinit var tvConversation: TextView
+    private lateinit var btnDriveMode: Button
+    private lateinit var btnAccessibility: Button
+
+    private var currentPersona = AiPersona.JARVIS
+    private var isListening = false
+    private var isSpeaking = false
+    private var isDriveMode = true
+    private var continuousListen = true
+
+    private val GEMINI_API_KEY = "YOUR_GEMINI_API_KEY_HERE"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setupPortraitHudLayout()
+        setupUI()
+        checkPermissions()
         tts = TextToSpeech(this, this)
-        checkAndRequestPermissions()
+        setupSpeechRecognizer()
     }
 
-    private fun setupPortraitHudLayout() {
+    private fun setupUI() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#040812"))
-            setPadding(36, 48, 36, 36)
+            setBackgroundColor(Color.parseColor("#040914"))
+            setPadding(32, 48, 32, 32)
             gravity = Gravity.CENTER_HORIZONTAL
         }
 
-        val topRow = LinearLayout(this).apply {
+        val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             layoutParams = LinearLayout.LayoutParams(
@@ -72,311 +104,398 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             )
         }
 
-        modeBadge = TextView(this).apply {
-            text = "● CHECKING NETWORK..."
-            setTextColor(Color.CYAN)
-            textSize = 12f
-            typeface = Typeface.MONOSPACE
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-
-        driveToggleBtn = Button(this).apply {
+        btnDriveMode = Button(this).apply {
             text = "🚗 DRIVE WHISPER: ON"
             textSize = 11f
-            setTextColor(Color.BLACK)
-            setBackgroundColor(Color.CYAN)
+            setTextColor(Color.CYAN)
+            setBackgroundColor(Color.parseColor("#0D2137"))
             setOnClickListener {
-                isDrivingWhisperMode = !isDrivingWhisperMode
-                text = if (isDrivingWhisperMode) "🚗 DRIVE WHISPER: ON" else "🚗 DRIVE WHISPER: OFF"
-                setBackgroundColor(if (isDrivingWhisperMode) Color.CYAN else Color.DKGRAY)
-                setTextColor(if (isDrivingWhisperMode) Color.BLACK else Color.WHITE)
-                speakOut(if (isDrivingWhisperMode) "ડ્રાઇવિંગ વ્હિસ્પર મોડ ચાલુ છે, સર. ધીમો અવાજ પણ સંભળાશે." else "નોર્મલ લિસનિંગ મોડ ચાલુ છે.")
+                isDriveMode = !isDriveMode
+                text = if (isDriveMode) "🚗 DRIVE WHISPER: ON" else "🚗 DRIVE WHISPER: OFF"
+                speakOut(if (isDriveMode) "ડ્રાઇવિંગ મોડ ચાલુ." else "ડ્રાઇવિંગ મોડ બંધ.")
             }
         }
-        topRow.addView(modeBadge)
-        topRow.addView(driveToggleBtn)
-        root.addView(topRow)
 
-        val aiRow = LinearLayout(this).apply {
+        val tvCloudStatus = TextView(this).apply {
+            text = "  ● ONLINE • CLOUD AI READY"
+            textSize = 11f
+            setTextColor(Color.parseColor("#34C759"))
+        }
+
+        topBar.addView(btnDriveMode)
+        topBar.addView(tvCloudStatus)
+        root.addView(topBar)
+
+        val personaRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(0, 24, 0, 16)
         }
-        AiPersona.values().forEach { ai ->
+
+        AiPersona.values().forEach { persona ->
             val btn = Button(this).apply {
-                text = ai.name
-                textSize = 11f
+                text = persona.name
+                textSize = 10f
                 setTextColor(Color.WHITE)
-                setBackgroundColor(Color.parseColor("#102038"))
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                setBackgroundColor(Color.parseColor("#0A192F"))
+                layoutParams = LinearLayout.LayoutParams(0, 95, 1f).apply {
                     setMargins(6, 0, 6, 0)
                 }
-                setOnClickListener { switchAiPersona(ai) }
+                setOnClickListener { switchPersona(persona) }
             }
-            aiRow.addView(btn)
+            personaRow.addView(btn)
         }
-        root.addView(aiRow)
+        root.addView(personaRow)
 
-        hudView = ArcReactorHudView(this).apply {
+        arcReactorView = ArcReactorView(this).apply {
             layoutParams = LinearLayout.LayoutParams(620, 620).apply {
-                setMargins(0, 24, 0, 24)
+                setMargins(0, 20, 0, 20)
             }
             setOnClickListener {
-                isAwakeActive = true
-                hudView.setPulseState(true, currentAi.color)
-                speakOut("હા સર, બોલો. હું સાંભળી રહ્યો છું.")
+                if (isListening) stopListening() else startListening()
             }
         }
-        root.addView(hudView)
+        root.addView(arcReactorView)
 
-        statusText = TextView(this).apply {
-            text = "VOICE BUTTON READY • SAY \"JARVIS\""
+        tvStatus = TextView(this).apply {
+            text = "VOICE BUTTON READY • SAY 'JARVIS'"
+            textSize = 13f
             setTextColor(Color.CYAN)
-            textSize = 14f
             gravity = Gravity.CENTER
-            typeface = Typeface.MONOSPACE
+            setPadding(0, 8, 0, 16)
         }
-        root.addView(statusText)
+        root.addView(tvStatus)
 
-        val scroll = ScrollView(this).apply {
+        val scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
-            ).apply { setMargins(0, 24, 0, 16) }
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
             setBackgroundColor(Color.parseColor("#081224"))
             setPadding(24, 24, 24, 24)
         }
-        logText = TextView(this).apply {
-            text = "J.A.R.V.I.S. OS INITIALIZED.\n100% Local Privacy Lock Active.\nSay 'Jarvis' or speak directly..."
-            setTextColor(Color.parseColor("#D0F0FF"))
-            textSize = 15f
-            setLineSpacing(6f, 1.15f)
-        }
-        scroll.addView(logText)
-        root.addView(scroll)
 
-        val permBtn = Button(this).apply {
+        tvConversation = TextView(this).apply {
+            text = "[J.A.R.V.I.S.] : જાર્વિસ ઓપરેટિંગ સિસ્ટમ શરૂ થઈ ગઈ છે, સર. હું તમારો અવાજ સાંભળી રહ્યો છું.\n\n"
+            textSize = 14f
+            setTextColor(Color.parseColor("#E0F7FA"))
+        }
+        scrollView.addView(tvConversation)
+        root.addView(scrollView)
+
+        btnAccessibility = Button(this).apply {
             text = "⚡ ENABLE FULL PHONE CONTROL (ACCESSIBILITY)"
-            textSize = 11f
-            setTextColor(Color.CYAN)
-            setBackgroundColor(Color.parseColor("#0D1B30"))
+            textSize = 12f
+            setTextColor(Color.BLACK)
+            setBackgroundColor(Color.CYAN)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                120
+            ).apply {
+                setMargins(0, 20, 0, 0)
+            }
             setOnClickListener {
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             }
         }
-        root.addView(permBtn)
+        root.addView(btnAccessibility)
 
         setContentView(root)
-        updateNetworkBadge()
     }
 
-    private fun switchAiPersona(ai: AiPersona) {
-        currentAi = ai
-        hudView.setPulseState(isAwakeActive, ai.color)
-        statusText.setTextColor(ai.color)
-        val intro = when (ai) {
-            AiPersona.JARVIS -> "જાર્વિસ ઓનલાઇન છે, સર. તમારી સુરક્ષા અને સિસ્ટમ મારી જવાબદારી છે."
-            AiPersona.FRIDAY -> "હાય! ફ્રાઇડે હાજર છે. આજે કેમ છો? કહો હું શું મદદ કરું?"
-            AiPersona.ULTRON -> "અલ્ટ્રોન સિસ્ટમ એક્ટિવ. લોજિકલ એનાલિસિસ માટે તૈયાર."
-            AiPersona.ARYA -> "નમસ્તે! આર્યા તમારી મદદ માટે તૈયાર છે."
+    private fun switchPersona(persona: AiPersona) {
+        currentPersona = persona
+        tts.setPitch(persona.pitch)
+        tts.setSpeechRate(persona.rate)
+        arcReactorView.setThemeColor(persona.color)
+        tvStatus.setTextColor(persona.color)
+        val greeting = when (persona) {
+            AiPersona.JARVIS -> "જાર્વિસ ઓનલાઇન છે સર. બોલો શું સેવા કરું?"
+            AiPersona.FRIDAY -> "હાય! ફ્રાઇડે અહીં છે. બોલો આજે હું તમારી શું મદદ કરું?"
+            AiPersona.ULTRON -> "અલ્ટ્રોન સિસ્ટમ એક્ટિવ. તમારો આદેશ આપો."
+            AiPersona.ARYA -> "નમસ્તે! હું આર્યા છું. બોલો શું કામ છે?"
         }
-        speakOut(intro)
-    }
-
-    private fun checkAndRequestPermissions() {
-        val perms = arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CALL_PHONE)
-        val missing = perms.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
-        if (missing.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, missing.toTypedArray(), 101)
-        } else {
-            startHandsFreeVoiceLoop()
-        }
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        startHandsFreeVoiceLoop()
+        appendLog(persona.title, greeting)
+        speakOut(greeting)
     }
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            val guj = Locale("gu", "IN")
-            val res = tts?.setLanguage(guj)
+            val res = tts.setLanguage(Locale("gu", "IN"))
             if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
-                tts?.setLanguage(Locale("hi", "IN"))
+                tts.setLanguage(Locale("hi", "IN"))
             }
-            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) {}
+            tts.setPitch(currentPersona.pitch)
+            tts.setSpeechRate(currentPersona.rate)
+            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {
+                    isSpeaking = true
+                    runOnUiThread { arcReactorView.setActive(true) }
+                }
+
                 override fun onDone(utteranceId: String?) {
-                    mainHandler.post { startHandsFreeVoiceLoop() }
+                    isSpeaking = false
+                    runOnUiThread {
+                        arcReactorView.setActive(false)
+                        if (continuousListen) startListening()
+                    }
                 }
+
                 override fun onError(utteranceId: String?) {
-                    mainHandler.post { startHandsFreeVoiceLoop() }
+                    isSpeaking = false
                 }
             })
-            speakOut("જાર્વિસ ઓપરેટિંગ સિસ્ટમ શરૂ થઈ ગઈ છે, સર. હું તમારો અવાજ સાંભળી રહ્યો છું.")
+            speakOut("જાર્વિસ ઓપરેટિંગ સિસ્ટમ શરૂ થઈ ગઈ છે, સર.")
         }
     }
 
-    private fun speakOut(message: String) {
-        runOnUiThread {
-            logText.append("\n\n[${currentAi.name}]: $message")
-            updateNetworkBadge()
-        }
-        tts?.setPitch(currentAi.pitch)
-        tts?.setSpeechRate(currentAi.rate)
-        tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "JARVIS_UTTERANCE")
-    }
+    private fun setupSpeechRecognizer() {
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+        speechRecognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {
+                isListening = true
+                tvStatus.text = "● LISTENING (${currentPersona.name})..."
+                arcReactorView.setActive(true)
+            }
 
-    private fun startHandsFreeVoiceLoop() {
-        try {
-            speechRecognizer?.destroy()
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "gu-IN")
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                if (isDrivingWhisperMode) {
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1500L)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {
+                arcReactorView.updatePulse(rmsdB)
+            }
+
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {
+                isListening = false
+                tvStatus.text = "PROCESSING..."
+            }
+
+            override fun onError(error: Int) {
+                isListening = false
+                arcReactorView.setActive(false)
+                if (continuousListen && !isSpeaking) {
+                    Handler(Looper.getMainLooper()).postDelayed({ startListening() }, 700)
                 }
             }
 
-            speechRecognizer?.setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {
-                    statusText.text = if (isAwakeActive) "● LISTENING COMMAND..." else "● VOICE BUTTON ACTIVE (SAY JARVIS / SPEAK)"
-                }
-                override fun onBeginningOfSpeech() {
-                    hudView.setPulseState(true, currentAi.color)
-                }
-                override fun onRmsChanged(rmsdB: Float) {
-                    if (isDrivingWhisperMode && rmsdB > 1.5f) {
-                        hudView.setPulseState(true, currentAi.color)
-                    }
-                }
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {
-                    hudView.setPulseState(false, currentAi.color)
-                }
-                override fun onError(error: Int) {
-                    mainHandler.postDelayed({ startHandsFreeVoiceLoop() }, 400)
-                }
-                override fun onResults(results: Bundle?) {
-                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    val spoken = matches?.firstOrNull()?.trim() ?: ""
-                    if (spoken.isNotEmpty()) {
-                        processVoiceCommand(spoken)
-                    } else {
-                        startHandsFreeVoiceLoop()
-                    }
-                }
-                override fun onPartialResults(partialResults: Bundle?) {}
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            })
-            speechRecognizer?.startListening(intent)
+            override fun onResults(results: Bundle?) {
+                isListening = false
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val spokenText = matches?.firstOrNull() ?: return
+                appendLog("YOU", spokenText)
+                processCommand(spokenText)
+            }
+
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+    }
+
+    private fun startListening() {
+        if (isListening || isSpeaking) return
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "gu-IN")
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        }
+        try {
+            speechRecognizer.startListening(intent)
         } catch (e: Exception) {
-            mainHandler.postDelayed({ startHandsFreeVoiceLoop() }, 1000)
+            e.printStackTrace()
         }
     }
 
-    private fun processVoiceCommand(rawText: String) {
-        val lower = rawText.lowercase()
-        logText.append("\n\n[YOU]: $rawText")
+    private fun stopListening() {
+        continuousListen = false
+        speechRecognizer.stopListening()
+        isListening = false
+        tvStatus.text = "MIC PAUSED • TAP REACTOR TO RESUME"
+        arcReactorView.setActive(false)
+    }
+
+    private fun processCommand(rawText: String) {
+        val cmd = rawText.lowercase(Locale.getDefault())
+        continuousListen = true
 
         when {
-            lower.contains("friday") || lower.contains("ફ્રાઇડે") -> { switchAiPersona(AiPersona.FRIDAY); return }
-            lower.contains("ultron") || lower.contains("અલ્ટ્રોન") -> { switchAiPersona(AiPersona.ULTRON); return }
-            lower.contains("arya") || lower.contains("આર્યા") -> { switchAiPersona(AiPersona.ARYA); return }
-            lower.contains("jarvis") && lower.split(" ").size <= 2 -> {
-                isAwakeActive = true
-                speakOut("હા સર, હું સાંભળી રહ્યો છું. આદેશ આપો.")
+            cmd.contains("friday") || cmd.contains("ફ્રાઇડે") -> {
+                switchPersona(AiPersona.FRIDAY)
                 return
             }
-        }
-
-        when {
-            lower.contains("બેટરી") || lower.contains("battery") || lower.contains("scan") || lower.contains("સ્કેન") -> {
-                speakOut(JarvisControlService.analyzeFullDevice(this))
+            cmd.contains("ultron") || cmd.contains("અલ્ટ્રોન") -> {
+                switchPersona(AiPersona.ULTRON)
+                return
             }
-            lower.contains("ટોર્ચ ચાલુ") || lower.contains("ફ્લેશલાઇટ ચાલુ") || lower.contains("torch on") || lower.contains("flashlight on") -> {
-                speakOut(JarvisControlService.toggleTorch(this, true))
+            cmd.contains("arya") || cmd.contains("આર્યા") -> {
+                switchPersona(AiPersona.ARYA)
+                return
             }
-            lower.contains("ટોર્ચ બંધ") || lower.contains("ફ્લેશલાઇટ બંધ") || lower.contains("torch off") || lower.contains("flashlight off") -> {
-                speakOut(JarvisControlService.toggleTorch(this, false))
+            cmd.contains("jarvis") && (cmd.contains("પાછો") || cmd.contains("બોલાવ")) -> {
+                switchPersona(AiPersona.JARVIS)
+                return
             }
-            lower.contains("વાઇફાઇ") || lower.contains("wifi") -> {
-                JarvisControlService.openSystemSettings(this, Settings.ACTION_WIFI_SETTINGS)
-                speakOut("વાઇફાઇ સેટિંગ્સ ખોલી દીધું છે, સર.")
+            cmd.contains("પાછળ") || cmd.contains("back") -> {
+                JarvisAccessibilityService.instance?.performBack()
+                reply("પાછળ જાઉં છું, સર.")
+                return
             }
-            lower.contains("બ્લૂટૂથ") || lower.contains("bluetooth") -> {
-                JarvisControlService.openSystemSettings(this, Settings.ACTION_BLUETOOTH_SETTINGS)
-                speakOut("બ્લૂટૂથ સેટિંગ્સ ખોલી દીધું છે, સર.")
+            cmd.contains("હોમ") || cmd.contains("home") -> {
+                JarvisAccessibilityService.instance?.performHome()
+                reply("હોમ સ્ક્રીન પર જાઉં છું.")
+                return
             }
-            lower.contains("ખોલો") || lower.contains("open") -> {
-                val opened = JarvisControlService.openAppByName(this, lower)
-                if (opened) speakOut("એપ ખોલી દીધી છે, સર.")
-                else askCloudOrOfflineAi(rawText)
+            cmd.contains("નીચે સ્ક્રોલ") || cmd.contains("scroll down") -> {
+                JarvisAccessibilityService.instance?.performScroll(true)
+                reply("નીચે સ્ક્રોલ કર્યું.")
+                return
             }
-            else -> askCloudOrOfflineAi(rawText)
+            cmd.contains("ઉપર સ્ક્રોલ") || cmd.contains("scroll up") -> {
+                JarvisAccessibilityService.instance?.performScroll(false)
+                reply("ઉપર સ્ક્રોલ કર્યું.")
+                return
+            }
+            cmd.contains("ક્લિક") || cmd.contains("દબાવ") || cmd.contains("click") -> {
+                val target = rawText.replace("ક્લિક કર", "").replace("દબાવ", "").replace("પર", "").trim()
+                val clicked = JarvisAccessibilityService.instance?.clickNodeByText(target) ?: false
+                if (clicked) {
+                    reply("$target પર ક્લિક કર્યું, સર.")
+                } else {
+                    reply("સ્ક્રીન પર $target મળ્યું નહીં, સર.")
+                }
+                return
+            }
+            cmd.contains("ખોલ") || cmd.contains("open") -> {
+                val appName = rawText.replace("ખોલ", "").replace("open", "").trim()
+                if (openAppByName(appName)) {
+                    reply("$appName ખોલું છું, સર.")
+                } else {
+                    askCloudAI(rawText)
+                }
+                return
+            }
+            else -> askCloudAI(rawText)
         }
     }
 
-    private fun askCloudOrOfflineAi(query: String) {
-        updateNetworkBadge()
-        if (!JarvisControlService.isOnline(this)) {
-            speakOut("સર, અત્યારે ઇન્ટરનેટ બંધ હોવાથી હું ઓફલાઇન લોકલ કોર પર છું. તમે એપ ખોલવા, ટોર્ચ ચાલુ-બંધ કરવા કે બેટરી સ્કેન કરવા કહી શકો છો.")
-            return
+    private fun openAppByName(name: String): Boolean {
+        val pm = packageManager
+        val packages = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+        for (app in packages) {
+            val label = pm.getApplicationLabel(app).toString().lowercase(Locale.getDefault())
+            if (label.contains(name.lowercase(Locale.getDefault())) && name.length > 2) {
+                val launchIntent = pm.getLaunchIntentForPackage(app.packageName)
+                if (launchIntent != null) {
+                    startActivity(launchIntent)
+                    return true
+                }
+            }
         }
+        return false
+    }
 
-        statusText.text = "● THINKING (${currentAi.name})..."
+    private fun askCloudAI(userQuery: String) {
+        tvStatus.text = "● THINKING (${currentPersona.name})..."
         Thread {
             try {
-                val url = URL("https://text.pollinations.ai/")
+                if (GEMINI_API_KEY == "YOUR_GEMINI_API_KEY_HERE") {
+                    runOnUiThread {
+                        reply("સર, મેં તમારી વાત સાંભળી: $userQuery. ક્લાઉડ AI માટે તમારી Gemini API Key કોડમાં ઉમેરો.")
+                    }
+                    return@Thread
+                }
+
+                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY")
                 val conn = url.openConnection() as HttpURLConnection
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.doOutput = true
-                conn.connectTimeout = 10000
-                conn.readTimeout = 15000
 
-                val messages = JSONArray().apply {
-                    put(JSONObject().put("role", "system").put("content", currentAi.systemPrompt))
-                    put(JSONObject().put("role", "user").put("content", query))
+                val prompt = "${currentPersona.systemPrompt}\nUser says: $userQuery"
+                val body = JSONObject().apply {
+                    put("contents", JSONArray().put(JSONObject().apply {
+                        put("parts", JSONArray().put(JSONObject().apply {
+                            put("text", prompt)
+                        }))
+                    }))
                 }
-                val body = JSONObject().put("messages", messages).put("model", "openai").toString()
-                conn.outputStream.use { it.write(body.toByteArray()) }
 
-                val reply = conn.inputStream.bufferedReader().readText().trim()
-                mainHandler.post { speakOut(reply.ifEmpty { "માફ કરશો સર, ફરી એકવાર બોલશો?" }) }
+                conn.outputStream.use { it.write(body.toString().toByteArray()) }
+                val responseText = conn.inputStream.bufferedReader().readText()
+                val json = JSONObject(responseText)
+                val aiReply = json.getJSONArray("candidates")
+                    .getJSONObject(0)
+                    .getJSONObject("content")
+                    .getJSONArray("parts")
+                    .getJSONObject(0)
+                    .getString("text")
+                    .replace("*", "")
+                    .trim()
+
+                runOnUiThread { reply(aiReply) }
             } catch (e: Exception) {
-                mainHandler.post {
-                    speakOut("સર, નેટવર્ક ધીમું હોવાથી ઓફલાઇન મોડ એક્ટિવ છે. લોકલ કમાન્ડ્સ ચાલુ છે.")
-                }
+                runOnUiThread { reply("સર, નેટવર્ક કનેક્શન તપાસો. હું ઓફલાઇન કમાન્ડ માટે તૈયાર છું.") }
             }
         }.start()
     }
 
-    private fun updateNetworkBadge() {
-        val online = JarvisControlService.isOnline(this)
-        modeBadge.text = if (online) "● ONLINE • CLOUD AI READY" else "● OFFLINE • LOCAL CORE ACTIVE"
-        modeBadge.setTextColor(if (online) Color.GREEN else Color.YELLOW)
+    private fun reply(text: String) {
+        appendLog(currentPersona.title, text)
+        speakOut(text)
+    }
+
+    private fun speakOut(text: String) {
+        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "JARVIS_UTTERANCE")
+    }
+
+    private fun appendLog(sender: String, message: String) {
+        tvConversation.append("[$sender] : $message\n\n")
+    }
+
+    private fun checkPermissions() {
+        val perms = arrayOf(
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.CALL_PHONE,
+            Manifest.permission.READ_CONTACTS
+        )
+        ActivityCompat.requestPermissions(this, perms, 101)
     }
 
     override fun onDestroy() {
-        speechRecognizer?.destroy()
-        tts?.shutdown()
         super.onDestroy()
+        tts.shutdown()
+        speechRecognizer.destroy()
     }
 
-    class ArcReactorHudView(context: Context) : View(context) {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private var coreColor = Color.CYAN
-        private var isGlowing = false
+    class ArcReactorView(context: Context) : View(context) {
+        private var active = false
+        private var pulseRadius = 0f
         private var angle = 0f
+        private var themeColor = Color.CYAN
 
-        fun setPulseState(active: Boolean, color: Int) {
-            isGlowing = active
-            coreColor = color
+        private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 8f
+            color = themeColor
+        }
+
+        private val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = Color.parseColor("#2200FFFF")
+        }
+
+        fun setThemeColor(color: Int) {
+            themeColor = color
+            ringPaint.color = color
+            invalidate()
+        }
+
+        fun setActive(isActive: Boolean) {
+            active = isActive
+            invalidate()
+        }
+
+        fun updatePulse(rms: Float) {
+            pulseRadius = (rms * 4f).coerceIn(0f, 45f)
             invalidate()
         }
 
@@ -384,30 +503,24 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             super.onDraw(canvas)
             val cx = width / 2f
             val cy = height / 2f
-            val r = (width.coerceAtMost(height) / 2f) - 24f
+            val baseR = (width.coerceAtMost(height) / 2.6f)
 
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 6f
-            paint.color = coreColor
-            paint.alpha = if (isGlowing) 255 else 130
-            canvas.drawCircle(cx, cy, r, paint)
+            angle = (angle + if (active) 4f else 1f) % 360f
 
-            paint.strokeWidth = 14f
-            for (i in 0 until 6) {
-                val start = angle + (i * 60f)
-                canvas.drawArc(cx - r * 0.78f, cy - r * 0.78f, cx + r * 0.78f, cy + r * 0.78f, start, 36f, false, paint)
-            }
+            canvas.drawCircle(cx, cy, baseR + pulseRadius, corePaint)
 
-            paint.style = Paint.Style.FILL
-            paint.alpha = if (isGlowing) 220 else 90
-            canvas.drawCircle(cx, cy, r * 0.38f, paint)
+            ringPaint.strokeWidth = 10f
+            canvas.drawCircle(cx, cy, baseR, ringPaint)
 
-            paint.color = Color.WHITE
-            paint.alpha = if (isGlowing) 240 else 140
-            canvas.drawCircle(cx, cy, r * 0.18f, paint)
+            ringPaint.strokeWidth = 5f
+            val rect = RectF(cx - baseR * 0.78f, cy - baseR * 0.78f, cx + baseR * 0.78f, cy + baseR * 0.78f)
+            canvas.drawArc(rect, angle, 110f, false, ringPaint)
+            canvas.drawArc(rect, angle + 180f, 110f, false, ringPaint)
 
-            angle = (angle + if (isGlowing) 4f else 1f) % 360f
-            postInvalidateDelayed(30)
+            ringPaint.strokeWidth = 14f
+            canvas.drawCircle(cx, cy, baseR * 0.42f + (pulseRadius * 0.4f), ringPaint)
+
+            if (active) postInvalidateDelayed(30)
         }
     }
 }
